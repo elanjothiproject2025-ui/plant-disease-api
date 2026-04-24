@@ -6,65 +6,76 @@ import os
 
 app = Flask(__name__)
 
-# ================== TELEGRAM CONFIG ==================
 BOT_TOKEN = "8290672651:AAEdi86fVQXo8XpTOYWxARvhQHdUETjWjAg"
 
 users = set()
 last_command = "S"
 capture_flag = False
+esp32_online = False
 
-# ================== TELEGRAM ==================
 def update_users():
     global capture_flag
 
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
-    try:
-        res = requests.get(url).json()
+    res = requests.get(url).json()
 
-        if "result" in res:
-            for msg in res["result"]:
-                try:
-                    chat_id = msg["message"]["chat"]["id"]
-                    users.add(chat_id)
+    if "result" in res:
+        for msg in res["result"]:
+            try:
+                chat_id = msg["message"]["chat"]["id"]
+                users.add(chat_id)
 
-                    text = msg["message"].get("text", "")
+                text = msg["message"].get("text", "")
 
-                    if text == "/capture":
-                        capture_flag = True
+                if text in ["hi", "/start"]:
+                    send_telegram(
+                        "🚗 Commands:\n"
+                        "/capture → take image\n"
+                        "/status → check ESP32\n"
+                        "Web → control rover"
+                    )
 
-                except:
-                    pass
-    except:
-        pass
+                if text == "/capture":
+                    capture_flag = True
+                    send_telegram("📸 Capture requested")
+
+                if text == "/status":
+                    send_telegram("✅ ESP32 ONLINE" if esp32_online else "❌ ESP32 OFFLINE")
+
+            except:
+                pass
 
 def send_telegram(msg):
     for chat_id in users:
-        try:
-            requests.post(
-                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-                data={"chat_id": chat_id, "text": msg}
-            )
-        except:
-            pass
+        requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+            data={"chat_id": chat_id, "text": msg}
+        )
 
-# ================== WEB CONTROL ==================
+def send_image(img):
+    for chat_id in users:
+        requests.post(
+            f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
+            data={"chat_id": chat_id},
+            files={"photo": ("img.jpg", img)}
+        )
+
 @app.route('/')
 def home():
     return '''
-    <h2>🚗 Rover Control Panel</h2>
+    <h2>🚗 Rover Control</h2>
+    <button onclick="send('F')">Forward</button><br><br>
+    <button onclick="send('L')">Left</button>
+    <button onclick="send('S')">Stop</button>
+    <button onclick="send('R')">Right</button><br><br>
+    <button onclick="send('B')">Backward</button>
 
-    <button onclick="send('F')">⬆ Forward</button><br><br>
-
-    <button onclick="send('L')">⬅ Left</button>
-    <button onclick="send('S')">⏹ Stop</button>
-    <button onclick="send('R')">➡ Right</button><br><br>
-
-    <button onclick="send('B')">⬇ Backward</button>
-
+    <br><br>
+    <input type="range" min="0" max="180" onchange="servo(this.value)">
+    
     <script>
-    function send(cmd){
-        fetch('/control?cmd=' + cmd)
-    }
+    function send(cmd){ fetch('/control?cmd='+cmd); }
+    function servo(v){ fetch('/control?cmd=SERVO:'+v); }
     </script>
     '''
 
@@ -74,11 +85,10 @@ def control():
     last_command = request.args.get("cmd", "S")
     return "OK"
 
-# ================== ESP32 POLLING ==================
 @app.route('/get_command')
 def get_command():
-    global capture_flag
-
+    global capture_flag, esp32_online
+    esp32_online = True
     update_users()
 
     if capture_flag:
@@ -87,31 +97,19 @@ def get_command():
 
     return last_command
 
-# ================== IMAGE UPLOAD ==================
 @app.route('/predict', methods=['POST'])
 def predict():
-    try:
-        file = request.files['image']
+    file = request.files['image']
+    img_bytes = file.read()
 
-        img = Image.open(file).resize((224, 224))
-        img = np.array(img) / 255.0
+    result = "Leaf Spot"
+    confidence = 0.92
 
-        # Dummy detection (fast cloud)
-        result = "Leaf Spot"
-        confidence = 0.92
+    send_telegram(f"🌿 {result} ({confidence})")
+    send_image(img_bytes)
 
-        msg = f"Disease: {result}\nConfidence: {confidence:.2f}"
-        send_telegram(msg)
+    return jsonify({"result": result})
 
-        return jsonify({
-            "disease": result,
-            "confidence": confidence
-        })
-
-    except Exception as e:
-        return jsonify({"error": str(e)})
-
-# ================== RUN ==================
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
