@@ -9,10 +9,14 @@ app = Flask(__name__)
 # ================== TELEGRAM CONFIG ==================
 BOT_TOKEN = "8290672651:AAEdi86fVQXo8XpTOYWxARvhQHdUETjWjAg"
 
-# Store all users (multi-user support)
 users = set()
+last_command = "S"
+capture_flag = False
 
+# ================== TELEGRAM ==================
 def update_users():
+    global capture_flag
+
     url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
     try:
         res = requests.get(url).json()
@@ -22,39 +26,80 @@ def update_users():
                 try:
                     chat_id = msg["message"]["chat"]["id"]
                     users.add(chat_id)
+
+                    text = msg["message"].get("text", "")
+
+                    if text == "/capture":
+                        capture_flag = True
+
                 except:
                     pass
     except:
-        print("Error fetching users")
+        pass
 
 def send_telegram(msg):
-    update_users()
-
     for chat_id in users:
         try:
-            url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-            requests.post(url, data={
-                "chat_id": chat_id,
-                "text": msg
-            })
+            requests.post(
+                f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
+                data={"chat_id": chat_id, "text": msg}
+            )
         except:
-            print(f"Failed to send message to {chat_id}")
+            pass
 
-# ================== API ROUTE ==================
+# ================== WEB CONTROL ==================
+@app.route('/')
+def home():
+    return '''
+    <h2>🚗 Rover Control Panel</h2>
+
+    <button onclick="send('F')">⬆ Forward</button><br><br>
+
+    <button onclick="send('L')">⬅ Left</button>
+    <button onclick="send('S')">⏹ Stop</button>
+    <button onclick="send('R')">➡ Right</button><br><br>
+
+    <button onclick="send('B')">⬇ Backward</button>
+
+    <script>
+    function send(cmd){
+        fetch('/control?cmd=' + cmd)
+    }
+    </script>
+    '''
+
+@app.route('/control')
+def control():
+    global last_command
+    last_command = request.args.get("cmd", "S")
+    return "OK"
+
+# ================== ESP32 POLLING ==================
+@app.route('/get_command')
+def get_command():
+    global capture_flag
+
+    update_users()
+
+    if capture_flag:
+        capture_flag = False
+        return "CAPTURE"
+
+    return last_command
+
+# ================== IMAGE UPLOAD ==================
 @app.route('/predict', methods=['POST'])
 def predict():
     try:
         file = request.files['image']
 
-        # Basic image processing
         img = Image.open(file).resize((224, 224))
         img = np.array(img) / 255.0
 
-        # Dummy fast detection (cloud friendly)
+        # Dummy detection (fast cloud)
         result = "Leaf Spot"
         confidence = 0.92
 
-        # Send Telegram alert
         msg = f"Disease: {result}\nConfidence: {confidence:.2f}"
         send_telegram(msg)
 
@@ -65,11 +110,6 @@ def predict():
 
     except Exception as e:
         return jsonify({"error": str(e)})
-
-# ================== HOME ==================
-@app.route('/')
-def home():
-    return "Plant Disease API Running (Online)"
 
 # ================== RUN ==================
 if __name__ == '__main__':
