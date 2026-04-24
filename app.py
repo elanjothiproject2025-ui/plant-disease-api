@@ -1,10 +1,6 @@
 from flask import Flask, request, jsonify
-import numpy as np
-from PIL import Image
 import requests
 import os
-import threading
-import time
 
 app = Flask(__name__)
 
@@ -14,48 +10,39 @@ users = set()
 last_command = "S"
 capture_flag = False
 esp32_online = False
-last_update_id = None
+last_update_id = 0
 
-# ================= TELEGRAM THREAD =================
-def telegram_listener():
+# ================= TELEGRAM =================
+def update_users():
     global capture_flag, last_update_id
 
-    while True:
-        try:
-            url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates"
-            res = requests.get(url).json()
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates?offset={last_update_id+1}"
+    res = requests.get(url).json()
 
-            if "result" in res:
-                for msg in res["result"]:
-                    update_id = msg["update_id"]
+    if "result" in res:
+        for msg in res["result"]:
+            last_update_id = msg["update_id"]
 
-                    if last_update_id and update_id <= last_update_id:
-                        continue
+            try:
+                chat_id = msg["message"]["chat"]["id"]
+                users.add(chat_id)
 
-                    last_update_id = update_id
+                text = msg["message"].get("text", "")
 
-                    chat_id = msg["message"]["chat"]["id"]
-                    users.add(chat_id)
+                if text in ["hi", "/start"]:
+                    send_telegram("🚗 Commands:\n/capture\n/status")
 
-                    text = msg["message"].get("text", "")
+                elif text == "/capture":
+                    capture_flag = True
+                    print("📸 Capture flag TRUE")
+                    send_telegram("📸 Capture requested")
 
-                    if text in ["hi", "/start"]:
-                        send_telegram("🚗 Commands:\n/capture\n/status")
+                elif text == "/status":
+                    send_telegram("✅ ESP32 ONLINE" if esp32_online else "❌ ESP32 OFFLINE")
 
-                    elif text == "/capture":
-                        capture_flag = True
-                        print("📸 Capture flag set TRUE")
-                        send_telegram("📸 Capture requested")
+            except:
+                pass
 
-                    elif text == "/status":
-                        send_telegram("✅ ESP32 ONLINE" if esp32_online else "❌ ESP32 OFFLINE")
-
-        except:
-            pass
-
-        time.sleep(2)   # polling delay
-
-# ================= TELEGRAM SEND =================
 def send_telegram(msg):
     for chat_id in users:
         requests.post(
@@ -104,9 +91,12 @@ def get_command():
 
     esp32_online = True
 
+    # 🔥 IMPORTANT: process telegram HERE
+    update_users()
+
     if capture_flag:
-        print("🚀 Sending CAPTURE to ESP32")
         capture_flag = False
+        print("🚀 Sending CAPTURE")
         return "CAPTURE"
 
     return last_command
@@ -121,9 +111,7 @@ def predict():
 
     return jsonify({"ok": True})
 
-# ================= START =================
+# ================= RUN =================
 if __name__ == '__main__':
-    threading.Thread(target=telegram_listener).start()
-
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port)
