@@ -34,7 +34,6 @@ def update_users():
 
                 elif text == "/capture":
                     capture_flag = True
-                    print("📸 Capture flag TRUE")
                     send_telegram("📸 Capture requested")
 
                 elif text == "/status":
@@ -90,16 +89,18 @@ def get_command():
     global capture_flag, esp32_online
 
     esp32_online = True
-
-    # 🔥 IMPORTANT: process telegram HERE
     update_users()
 
     if capture_flag:
-        capture_flag = False
-        print("🚀 Sending CAPTURE")
         return "CAPTURE"
 
     return last_command
+
+@app.route('/capture_done')
+def capture_done():
+    global capture_flag
+    capture_flag = False
+    return "OK"
 
 # ================= IMAGE =================
 @app.route('/predict', methods=['POST'])
