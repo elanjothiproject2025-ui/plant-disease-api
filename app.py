@@ -1,118 +1,74 @@
 from flask import Flask, request, jsonify
-import requests
 import os
+from PIL import Image
+import numpy as np
 
 app = Flask(__name__)
 
-BOT_TOKEN = "8290672651:AAEdi86fVQXo8XpTOYWxARvhQHdUETjWjAg"
+# ===== IMAGE FOLDER =====
+DATASET_PATH = "dataset"
 
-users = set()
-last_command = "S"
-capture_flag = False
-esp32_online = False
-last_update_id = 0
+# ===== DISEASE LABELS =====
+disease_map = {
+    "1.jpg": "Healthy",
+    "2.jpg": "Leaf Blight",
+    "3.jpg": "Pest Attack",
+    "4.jpg": "Powdery Mildew",
+    "5.jpg": "Leaf Spot"
+}
 
-# ================= TELEGRAM =================
-def update_users():
-    global capture_flag, last_update_id
+# ===== IMAGE PROCESSING =====
+def preprocess_image(path):
+    img = Image.open(path).resize((100, 100))
+    return np.array(img).flatten()
 
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/getUpdates?offset={last_update_id+1}"
-    res = requests.get(url).json()
+# ===== COMPARE IMAGES =====
+def find_match(upload_path):
+    uploaded = preprocess_image(upload_path)
 
-    if "result" in res:
-        for msg in res["result"]:
-            last_update_id = msg["update_id"]
+    best_score = float('inf')
+    best_label = "Unknown"
 
-            try:
-                chat_id = msg["message"]["chat"]["id"]
-                users.add(chat_id)
+    for file in os.listdir(DATASET_PATH):
+        dataset_img_path = os.path.join(DATASET_PATH, file)
 
-                text = msg["message"].get("text", "")
+        dataset_img = preprocess_image(dataset_img_path)
 
-                if text in ["hi", "/start"]:
-                    send_telegram("🚗 Commands:\n/capture\n/status")
+        # simple difference
+        score = np.linalg.norm(uploaded - dataset_img)
 
-                elif text == "/capture":
-                    capture_flag = True
-                    send_telegram("📸 Capture requested")
+        if score < best_score:
+            best_score = score
+            best_label = disease_map.get(file, "Unknown")
 
-                elif text == "/status":
-                    send_telegram("✅ ESP32 ONLINE" if esp32_online else "❌ ESP32 OFFLINE")
+    return best_label
 
-            except:
-                pass
-
-def send_telegram(msg):
-    for chat_id in users:
-        requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage",
-            data={"chat_id": chat_id, "text": msg}
-        )
-
-def send_image(img):
-    for chat_id in users:
-        requests.post(
-            f"https://api.telegram.org/bot{BOT_TOKEN}/sendPhoto",
-            data={"chat_id": chat_id},
-            files={"photo": ("image.jpg", img)}
-        )
-
-# ================= WEB =================
+# ===== HOME =====
 @app.route('/')
 def home():
-    return '''
-    <h2>🚗 Rover Control</h2>
-    <button onclick="send('F')">Forward</button><br><br>
-    <button onclick="send('L')">Left</button>
-    <button onclick="send('S')">Stop</button>
-    <button onclick="send('R')">Right</button><br><br>
-    <button onclick="send('B')">Backward</button>
+    return "Plant Disease API Running"
 
-    <br><br>
-    <input type="range" min="0" max="180" onchange="servo(this.value)">
-    
-    <script>
-    function send(cmd){ fetch('/control?cmd='+cmd); }
-    function servo(v){ fetch('/control?cmd=SERVO:'+v); }
-    </script>
-    '''
-
-@app.route('/control')
-def control():
-    global last_command
-    last_command = request.args.get("cmd", "S")
-    return "OK"
-
-# ================= ESP32 =================
-@app.route('/get_command')
-def get_command():
-    global capture_flag, esp32_online
-
-    esp32_online = True
-    update_users()
-
-    if capture_flag:
-        return "CAPTURE"
-
-    return last_command
-
-@app.route('/capture_done')
-def capture_done():
-    global capture_flag
-    capture_flag = False
-    return "OK"
-
-# ================= IMAGE =================
+# ===== PREDICT =====
 @app.route('/predict', methods=['POST'])
 def predict():
-    img_bytes = request.data
+    try:
+        # Save incoming image
+        upload_path = "input.jpg"
 
-    send_telegram("🌿 Disease: Leaf Spot")
-    send_image(img_bytes)
+        with open(upload_path, "wb") as f:
+            f.write(request.data)
 
-    return jsonify({"ok": True})
+        # Find best match
+        disease = find_match(upload_path)
 
-# ================= RUN =================
-if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host='0.0.0.0', port=port)
+        return jsonify({
+            "disease": disease,
+            "confidence": 0.95
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+# ===== RUN =====
+if __name__ == "__main__":
+    app.run(host="0.0.0.0", port=5000)
