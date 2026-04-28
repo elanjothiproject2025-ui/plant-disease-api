@@ -30,7 +30,6 @@ def get_disease(upload_path):
 
     for file in os.listdir(DATASET_PATH):
         dataset_path = os.path.join(DATASET_PATH, file)
-
         dataset_img = process_image(dataset_path)
 
         score = np.linalg.norm(uploaded - dataset_img)
@@ -58,7 +57,7 @@ def home():
     </html>
     """)
 
-# ===== BROWSER UPLOAD =====
+# ===== LAPTOP UPLOAD =====
 @app.route('/upload', methods=['POST'])
 def upload():
 
@@ -70,7 +69,7 @@ def upload():
 
     return f"<h2>🌿 Result: {disease}</h2>"
 
-# ===== ESP32 ROUTE =====
+# ===== ESP32 UPLOAD =====
 @app.route('/predict', methods=['POST'])
 def predict():
 
@@ -81,9 +80,14 @@ def predict():
 
     disease = get_disease(path)
 
-    return disease   # clean text output
+    return disease   # plain text for ESP32
 
-# ===== RENDER COMPATIBLE RUN =====
+# ===== HEALTH CHECK =====
+@app.route('/status')
+def status():
+    return "Server Running"
+
+# ===== RUN (RENDER) =====
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
