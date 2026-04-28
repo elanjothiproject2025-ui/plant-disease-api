@@ -1,11 +1,11 @@
-from flask import Flask, request, jsonify
+from flask import Flask, request
 import os
 from PIL import Image
 import numpy as np
 
 app = Flask(__name__)
 
-# ===== IMAGE FOLDER =====
+# ===== DATASET FOLDER =====
 DATASET_PATH = "dataset"
 
 # ===== DISEASE LABELS =====
@@ -17,31 +17,33 @@ disease_map = {
     "5.jpg": "Leaf Spot"
 }
 
-# ===== IMAGE PROCESSING =====
-def preprocess_image(path):
+# ===== IMAGE PROCESS =====
+def process_image(path):
     img = Image.open(path).resize((100, 100))
     return np.array(img).flatten()
 
-# ===== COMPARE IMAGES =====
-def find_match(upload_path):
-    uploaded = preprocess_image(upload_path)
+# ===== FIND BEST MATCH =====
+def get_disease(upload_path):
+
+    uploaded = process_image(upload_path)
 
     best_score = float('inf')
-    best_label = "Unknown"
+    best_disease = "Unknown"
 
     for file in os.listdir(DATASET_PATH):
-        dataset_img_path = os.path.join(DATASET_PATH, file)
 
-        dataset_img = preprocess_image(dataset_img_path)
+        dataset_path = os.path.join(DATASET_PATH, file)
 
-        # simple difference
+        dataset_img = process_image(dataset_path)
+
+        # compare images
         score = np.linalg.norm(uploaded - dataset_img)
 
         if score < best_score:
             best_score = score
-            best_label = disease_map.get(file, "Unknown")
+            best_disease = disease_map.get(file, "Unknown")
 
-    return best_label
+    return best_disease
 
 # ===== HOME =====
 @app.route('/')
@@ -51,23 +53,22 @@ def home():
 # ===== PREDICT =====
 @app.route('/predict', methods=['POST'])
 def predict():
+
     try:
-        # Save incoming image
+        # save incoming image
         upload_path = "input.jpg"
 
         with open(upload_path, "wb") as f:
             f.write(request.data)
 
-        # Find best match
-        disease = find_match(upload_path)
+        # detect disease
+        disease = get_disease(upload_path)
 
-        return jsonify({
-            "disease": disease,
-            "confidence": 0.95
-        })
+        # ✅ RETURN ONLY TEXT (CLEAN OUTPUT)
+        return disease
 
     except Exception as e:
-        return jsonify({"error": str(e)})
+        return "Error: " + str(e)
 
 # ===== RUN =====
 if __name__ == "__main__":
