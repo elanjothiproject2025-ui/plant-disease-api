@@ -1,14 +1,13 @@
-from flask import Flask, request
+from flask import Flask, request, render_template_string
 import os
 from PIL import Image
 import numpy as np
 
 app = Flask(__name__)
 
-# ===== DATASET FOLDER =====
+# ===== DATASET =====
 DATASET_PATH = "dataset"
 
-# ===== DISEASE LABELS =====
 disease_map = {
     "1.jpg": "Healthy",
     "2.jpg": "Leaf Blight",
@@ -17,26 +16,23 @@ disease_map = {
     "5.jpg": "Leaf Spot"
 }
 
-# ===== IMAGE PROCESS =====
+# ===== PROCESS IMAGE =====
 def process_image(path):
     img = Image.open(path).resize((100, 100))
     return np.array(img).flatten()
 
-# ===== FIND BEST MATCH =====
+# ===== MATCH =====
 def get_disease(upload_path):
-
     uploaded = process_image(upload_path)
 
     best_score = float('inf')
     best_disease = "Unknown"
 
     for file in os.listdir(DATASET_PATH):
-
         dataset_path = os.path.join(DATASET_PATH, file)
 
         dataset_img = process_image(dataset_path)
 
-        # compare images
         score = np.linalg.norm(uploaded - dataset_img)
 
         if score < best_score:
@@ -45,31 +41,49 @@ def get_disease(upload_path):
 
     return best_disease
 
-# ===== HOME =====
+# ===== HOME (UPLOAD UI) =====
 @app.route('/')
 def home():
-    return "Plant Disease API Running"
+    return render_template_string("""
+    <html>
+    <body style="text-align:center;">
+    <h2>🌿 Plant Disease Detection</h2>
 
-# ===== PREDICT =====
+    <form action="/upload" method="post" enctype="multipart/form-data">
+        <input type="file" name="image"><br><br>
+        <input type="submit" value="Upload & Detect">
+    </form>
+
+    </body>
+    </html>
+    """)
+
+# ===== BROWSER UPLOAD =====
+@app.route('/upload', methods=['POST'])
+def upload():
+
+    file = request.files['image']
+    path = "input.jpg"
+    file.save(path)
+
+    disease = get_disease(path)
+
+    return f"<h2>🌿 Result: {disease}</h2>"
+
+# ===== ESP32 ROUTE =====
 @app.route('/predict', methods=['POST'])
 def predict():
 
-    try:
-        # save incoming image
-        upload_path = "input.jpg"
+    path = "input.jpg"
 
-        with open(upload_path, "wb") as f:
-            f.write(request.data)
+    with open(path, "wb") as f:
+        f.write(request.data)
 
-        # detect disease
-        disease = get_disease(upload_path)
+    disease = get_disease(path)
 
-        # ✅ RETURN ONLY TEXT (CLEAN OUTPUT)
-        return disease
+    return disease   # clean text output
 
-    except Exception as e:
-        return "Error: " + str(e)
-
-# ===== RUN =====
+# ===== RENDER COMPATIBLE RUN =====
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host="0.0.0.0", port=port)
